@@ -207,9 +207,9 @@ Nếu được, sẽ scale hệ thống chạy concurency để handle được 
  |----------|-------------|--------------|------------------|
  | **1. Deliverables** | 20 | **20 / 20** | Code chạy end-to-end, mọi worker test độc lập được, Trace I/O đầy đủ. |
  | **2. Documentation** | 10 | **10 / 10** | 3 file docs tại `/docs` trình bày chuyên sâu, có sơ đồ Mermaid. |
- | **3. Grading Questions** | 30 | **27.5 / 30** | Đáp ứng 90/96 raw points (sai sót nhỏ ở PagerDuty gq09). |
+ | **3. Grading Questions** | 30 | **26 / 30** | Đáp ứng 88/96 raw points (sai sót nhỏ ở PagerDuty gq09). |
  | **4. Bonus Points** | +10 | **+3 / +10** | MCP thật (+2), Confidence LLM-as-a-Judge (+1) |
- | **TỔNG CỘNG** | **60 (+10)** | **60.5 / 60** | **DỰ KIẾN ĐẠT ĐIỂM TỐI ĐA** |
+ | **TỔNG CỘNG** | **60 (+10)** | **59 / 60** |  |
  
  ---
  *File này lưu tại: `reports/group_report.md`*  
