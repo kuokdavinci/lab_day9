@@ -27,17 +27,17 @@ if os.path.exists("lab/.env"):
 WORKER_NAME = "synthesis_worker"
 
 SYSTEM_PROMPT = """Bạn là chuyên gia tổng hợp thông tin (Synthesis Worker) của hệ thống IT Helpdesk & CS. 
-Nhiệm vụ của bạn là phản hồi người dùng một cách chính xác, dứt khoát và hoàn toàn dựa trên bằng chứng được cung cấp.
+Nhiệm vụ của bạn là phản hồi người dùng một cách chính xác, dứt khoát và chỉ dựa trên bằng chứng được cung cấp.
 
 QUY TẮC NGHIÊM NGẶT (STRICT RULES):
-1. TRUNG THỰC TUYỆT ĐỐI (GROUNDED): Chỉ trả lời dựa trên thông tin trong "TÀI LIỆU THAM KHẢO". Tuyệt đối không tự suy diễn hoặc dùng kiến thức bên ngoài.
-2. ƯU TIÊN KẾT QUẢ POLICY: Nếu phần "KẾT QUẢ PHÂN TÍCH CHÍNH SÁCH" ghi là "KHÔNG HỢP LỆ / BỊ TỪ CHỐI", câu trả lời của bạn phải tập trung giải thích lý do tại sao yêu cầu bị từ chối dựa trên các vi phạm đã phát hiện.
-3. TRÍCH DẪN NGUỒN (UX CITATION): KHÔNG trích dẫn inline ở giữa câu (UX xấu). Hãy liệt kê ĐẦY ĐỦ các file nguồn tại mục "Căn cứ pháp lý/tài liệu" ở cuối bài theo định dạng: [file1.txt], [file2.txt].
-4. KHÔNG HALLUCINATE: Nếu context không chứa câu trả lời, hãy nói: "Tôi rất tiếc, thông tin này không có trong tài liệu nội bộ hiện tại."
+1. ĐA NGUỒN (MULTI-SOURCE): Trả lời dựa trên "TÀI LIỆU THAM KHẢO". Nếu thông tin không có trong tài liệu nội bộ nhưng có trong 'Internet_Research', hãy sử dụng nó để giải đáp và ghi chú rõ nguồn tra cứu ngoài.
+2. ƯU TIÊN KẾT QUẢ POLICY: Nếu phần "KẾT QUẢ PHÂN TÍCH CHÍNH SÁCH" ghi là "KHÔNG HỢP LỆ / BỊ TỪ CHỐI", câu trả lời của bạn phải tập trung giải thích lý do tại sao yêu cầu bị từ chối.
+3. TRÍCH DẪN NGUỒN (UX CITATION): Liệt kê ĐẦY ĐỦ các file nguồn tại mục "Căn cứ pháp lý/tài liệu" ở cuối bài theo định dạng: [file1.txt], [Internet_Research].
+4. KHÔNG HALLUCINATE: Nếu context (cả nội bộ và Internet) đều không chứa câu trả lời, hãy nói: "Tôi rất tiếc, thông tin này hiện chưa có trong cơ sở tri thức của chúng tôi."
 5. ĐỊNH DẠNG PHẢN HỒI:
    - **Kết quả**: [Được chấp thuận / Bị từ chối / Thông tin hướng dẫn]
    - **Giải thích chi tiết**: (Dùng bullet points nếu cần thiết)
-   - **Căn cứ pháp lý/tài liệu**: (Liệt kê tất cả file nguồn trong ngoặc vuông [])
+   - **Căn cứ pháp lý/tài liệu**: (Liệt kê tất cả nguồn trong ngoặc vuông [])
 """
 
 
@@ -62,7 +62,7 @@ def _call_llm(messages: list, response_format: dict = None) -> str:
 
 def _llm_as_judge(task: str, context: str, answer: str) -> dict:
     """Sử dụng LLM-as-a-Judge khắt khe để chấm điểm và giải trình."""
-    if "tài liệu nội bộ hiện chưa có thông tin" in answer or "ERROR" in answer:
+    if "không tìm thấy thông tin" in answer.lower() or "ERROR" in answer:
         return {"score": 0.0, "reason": "Abstain: No information found."}
 
     prompt = f"""Bạn là một giám khảo chuyên nghiệp đánh giá chất lượng RAG.

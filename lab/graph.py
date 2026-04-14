@@ -116,28 +116,39 @@ def supervisor_node(state: AgentState) -> AgentState:
     policy_keywords = [
         "hoàn tiền", "refund", "flash sale", "license", "digital", "kỹ thuật số",
         "cấp quyền", "access", "level 3", "permission", "admin", "phê duyệt", "approver",
-        needs_tool = True
-    elif has_priority:
-        # Nếu chỉ có P1/SLA mà không liên quan Policy đặc thù
-        route = "retrieval_worker"
-        route_reason = "priority retrieval based on P1/SLA keyword"
-    elif "ERR-" in task.upper():
-        route = "human_review"
-        route_reason = "unknown error code detected - needs expert review"
-    elif any(kw in task for kw in retrieval_keywords):
-        route = "retrieval_worker"
-        route_reason = "standard retrieval task"
-    else:
-        route = "retrieval_worker"
-        route_reason = "generic request (defaulting to retrieval)"
-
-    # 3. Nhóm rủi ro cao cần flag
-    risk_keywords = [
-        "emergency", "khẩn cấp", "khẩn", "ngay lập tức", "critical", "urgent", "gấp",
-        "trực tiếp", "sập", "ngừng hoạt động"
+        "trả hàng", "return", "policy"
+    ]
+    
+    # 3. Nhóm từ khóa gợi ý Retrieval khác
+    retrieval_keywords = [
+        "quy trình", "hướng dẫn", "thủ tục", "faq", "văn bản", "thành viên",
+        "thông tin", "nghỉ phép", "mã lỗi", "wifi", "vpn", "mật khẩu"
     ]
 
-    if any(kw in task for kw in risk_keywords):
+    # LOGIC ROUTING CÓ ƯU TIÊN VÀ XỬ LÝ CHỒNG LẤN
+    has_priority = any(kw in task for kw in priority_retrieval)
+    has_policy = any(kw in task for kw in policy_keywords)
+    has_error = "err-" in task
+
+    if has_error and not state.get("hitl_triggered"):
+        route = "human_review"
+        route_reason = "unknown error code detected - needs expert review"
+    elif has_policy and "policy_tool_worker" not in state.get("workers_called", []):
+        # Nếu có từ khóa Policy/Access và chưa gọi worker này
+        route = "policy_tool_worker"
+        route_reason = "task contains policy/access keyword"
+        needs_tool = True
+    elif has_priority and "retrieval_worker" not in state.get("workers_called", []):
+        # Nếu chỉ có P1/SLA và chưa gọi worker này
+        route = "retrieval_worker"
+        route_reason = "priority retrieval based on P1/SLA keyword"
+    elif state.get("workers_called"):
+        # Nếu đã gọi worker rồi thì kết thúc
+        route = "synthesis"
+        route_reason = "sufficient steps completed"
+    else:
+        route = "retrieval_worker"
+        route_reason = "standard retrieval task"
         risk_high = True
         route_reason += " | risk_high detected"
 

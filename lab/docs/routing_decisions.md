@@ -1,6 +1,6 @@
 # Routing Decisions Log — Lab Day 09
 
-**Nhóm:** Automata Tập Sự  
+**Nhóm:** Nhóm 2 người 
 **Ngày:** 14/04/2026
 
 > **Hướng dẫn:** Ghi lại ít nhất **3 quyết định routing** thực tế từ trace của nhóm.
@@ -76,8 +76,8 @@ Trường hợp mã lỗi dạng "ERR-XXX" không có sẵn trong CSDL sẽ đư
 
 | Worker | Số câu được route | % tổng |
 |--------|------------------|--------|
-| retrieval_worker | 7 | 46% |
-| policy_tool_worker | 7 | 46% |
+| retrieval_worker | 7 | 47% |
+| policy_tool_worker | 7 | 47% |
 | human_review/synthesis | 1 | 6% |
 
 ### Routing Accuracy

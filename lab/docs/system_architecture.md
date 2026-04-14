@@ -1,122 +1,60 @@
-## 1. Tổng quan kiến trúc
+# System Architecture — Lab Day 09: Multi-Agent Orchestration
 
-> Mô tả ngắn hệ thống của nhóm: chọn pattern gì, gồm những thành phần nào.
+##  1. Tổng quan kiến trúc
+Dự án áp dụng mô hình **Supervisor-Worker**. Thay vì một luồng tuyến tính, hệ thống cho phép Supervisor điều phối tác vụ qua nhiều worker trước khi đưa ra câu trả lời cuối cùng.
 
-**Pattern đã chọn:** Supervisor-Worker (với Routing Heuristic & Tool Abstraction qua MCP).
-  
-**Lý do chọn pattern này (thay vì single agent):**
-Kiến trúc này cho phép thay đổi luồng Single RAG thành một hệ thống linh hoạt.
-
----
-
-## 2. Sơ đồ Pipeline
-
-**Sơ đồ thực tế của nhóm:**
-
+## 🗺️ 2. Sơ đồ Pipeline (Mermaid Diagram)
 ```mermaid
-flowchart TD
-    A([User Task / Inquiry]) --> B(Supervisor Node)
+graph TD
+    User([User Query]) --> Supervisor{Supervisor Agent}
     
-    B --> |"if risk/error -> HitL"| C(Human Review Node)
-    B --> |"if policy/access"| D(Policy Tool Worker)
-    B --> |"else/standard"| E(Retrieval Worker)
-
-    C <--> |Web Search API / Terminal| U((Human Expert / Web))
-    D <--> |Tool Calls| M((MCP Server))
-    E <--> |Dense Embeddings / Jina Rerank| DB[(ChromaDB)]
-
-    C --> F(Synthesis Worker)
-    D --> F(Synthesis Worker)
-    E --> F(Synthesis Worker)
-
-    F <--> |LLM-as-a-Judge| LLM((OpenAI GPT_4o))
-    F --> G([Final Answer | Citations | Confidence])
+    %% Multi-hop Loops
+    Supervisor -- "SLA/P1 Context" --> Retrieval[Retrieval Worker]
+    Supervisor -- "Policy/Access Rules" --> Policy[Policy Agent]
+    
+    Retrieval --> Supervisor
+    Policy --> Supervisor
+    
+    %% Escalation Branch
+    Supervisor -- "Unknown Error (ERR-)" --> HITL[Smart HITL Node]
+    HITL -- "Tool: Brave/Jina Search" --> Internet((Internet))
+    Internet --> HITL
+    
+    %% Final Assembly
+    Supervisor -- "Sufficient Context" --> Synthesis[Synthesis Worker]
+    HITL --> Synthesis
+    
+    Synthesis -- "LLM-as-a-Judge" --> Judge{Confidence Check}
+    Judge -- "< 0.5" --> HITL
+    Judge -- ">= 0.5" --> Output([Final Answer + Citations])
 ```
 
----
+##  3. Chi tiết các thành phần
 
-## 3. Vai trò từng thành phần
+### Supervisor Agent (`graph.py`)
+- **Nhiệm vụ**: Đóng vai trò là "Bộ não" điều phối. Phân tích intent của người dùng thông qua Keyword Heuristics và trạng thái `workers_called` để quyết định bước đi tiếp theo.
+- **Routing Logic**: 
+    - Ưu tiên 1: Chặn các vi phạm Policy và Access Level.
+    - Ưu tiên 2: Truy xuất hồ sơ SLA/P1.
+    - Ưu tiên 3: Nếu gặp mã lỗi lạ (`ERR-`), đẩy sang nhánh Research bên ngoài.
+- **Multi-hop**: Sau mỗi bước Worker, Supervisor sẽ đánh giá lại Context để quyết định tiếp tục loop hay kết thúc tại Synthesis.
 
-### Supervisor (`graph.py`)
-
-| Thuộc tính | Mô tả |
-|-----------|-------|
-| **Nhiệm vụ** | Cửa ngõ (entry-point) diễn dịch từ khoá task và chỉ định nhánh Worker cho câu query |
-| **Input** | Raw Task string (`AgentState["task"]`) |
-| **Output** | `supervisor_route`, `route_reason`, `risk_high`, `needs_tool` |
-| **Routing logic** | Heuristics (Keyword list cứng) phân nhóm ưu tiên: 1. Chính sách/Lệnh hệ thống; 2. P1/Khẩn/SLA; 3. Lạ/Lỗi. |
-| **HITL condition** | Khớp tag lạ ("ERR-"), hoặc sau cuối LLM cho điểm Judge < 0.5 thì ném warning. |
-
-### Retrieval Worker (`workers/retrieval.py`)
-
-| Thuộc tính | Mô tả |
-|-----------|-------|
-| **Nhiệm vụ** | Bóc tách text -> Vector embeddings, search Semantic từ DB, trả về văn bản ngữ cảnh. |
-| **Embedding model** | Default: API Jina-embeddings-v3 / all-MiniLM-L6-v2 |
-| **Top-k** | k mặc định = 3, lấy dư -> Rerank qua Jina Reranker -> ra Top K sát nhất |
-| **Stateless?** | Yes |
-
-### Policy Tool Worker (`workers/policy_tool.py`)
-
-| Thuộc tính | Mô tả |
-|-----------|-------|
-| **Nhiệm vụ** | Giải quyết case phức tạo. Validate xem request có thoả mãn rule gộp (Refund/Access rule), liên thông Tool MCP. |
-| **MCP tools gọi** | `search_kb`, `get_ticket_info`, v.v... |
-| **Exception cases xử lý** | Đơn thẻ điện tử không hoàn, hàng ngâm quá lâu không hoàn, Level truy cập khẩn cấp. |
+### Workers Chuyên biệt
+- **Retrieval Worker**: Sử dụng Hybrid Search (Dense + BM25) kết hợp **Jina Reranker v2** để đảm bảo độ chính xác của các đoạn văn bản trích xuất từ ChromaDB.
+- **Policy Agent**: Một Agent tự trị có khả năng gọi các **MCP Tools** (`get_ticket_info`) để kiểm tra dữ liệu thực tế và đối chiếu với luật công ty.
+- **Smart HITL (Research)**: Giải quyết vấn đề "Kiến thức ngoài hệ thống" bằng cách tra cứu Internet thời gian thực.
 
 ### Synthesis Worker (`workers/synthesis.py`)
+- **Vai trò**: Trình bày câu trả lời chuyên nghiệp, ghi chú nguồn rõ ràng.
+- **LLM-as-a-Judge**: Tích hợp một quy trình tự đánh giá (Self-correction) để chấm điểm mức độ tin cậy. Nếu điểm Judge dưới 0.5, hệ thống sẽ tự động kích hoạt cờ `hitl_triggered`.
 
-| Thuộc tính | Mô tả |
-|-----------|-------|
-| **LLM model** | OpenAI `gpt-4o-mini` |
-| **Temperature** | `0` (Strictly Grounded, zero hallucination) |
-| **Grounding strategy** | Strict Context only, ép format cuối có khối "Citation" trích dẫn nguồn rành rọt. |
-| **Abstain condition** | Tự chấm điểm qua prompt "LLM-as-a-Judge". |
+##  4. MCP Tools và Tích hợp
+Hệ thống sử dụng MCP Server để đóng gói các khả năng tương tác ngoại vi:
+- `search_kb`: Công cụ tìm kiếm ngữ nghĩa nội bộ.
+- `get_ticket_info`: Kết nối (mock) tới hệ thống Jira/Helpdesk.
+- **Brave Search**: Capability nâng cao giúp Agent "thoát" khỏi giới hạn của Data nội bộ khi cần thiết.
 
-### MCP Server (`mcp_server.py`)
-
-| Tool | Input | Output |
-|------|-------|--------|
-| search_kb | query, top_k | chunks, sources |
-| get_ticket_info | ticket_id | ticket details (từ Mock Jira DB) |
-| check_access_permission | access_level, requester_role | can_grant, approvers |
-| create_ticket | priority, title, desc | mock URL, ticket ID |
-| brave_search | search query | Real-time Web content |
-
----
-
-## 4. Shared State Schema
-
-> Khối State lưu vết xuyên suốt đồ thị tác vụ.
-
-| Field | Type | Mô tả | Ai đọc/ghi |
-|-------|------|-------|-----------|
-| task | str | Câu hỏi đầu vào | Cả cụm đọc |
-| supervisor_route | str | Worker được chọn | supervisor ghi |
-| route_reason | str | Lý do route (tag lý luận) | supervisor ghi |
-| retrieved_chunks | list | Evidence từ DB / Reranker | retrieval ghi, synthesis đọc |
-| policy_result | dict | Kết quả kiểm tra policy | policy_tool ghi, synthesis đọc |
-| mcp_tools_used | list | Tool calls đã gọi và trả kết quả | policy_tool ghi |
-| final_answer | str | Câu trả lời cuối | synthesis ghi |
-| confidence | float | Mức tin cậy (qua Judge/Heuristic) | synthesis ghi |
-| history | list | Array Trace Logs chạy từng Node | Tất cả các Node |
-| judge_reason | str | Lời giải thích phê duyệt của trọng tài | synthesis ghi |
-
----
-
-## 5. Lý do chọn Supervisor-Worker so với Single Agent (Day 08)
-
-| Tiêu chí | Single Agent (Day 08) | Supervisor-Worker (Day 09) |
-|----------|----------------------|--------------------------|
-| Debug khi sai | Khó | Dễ hơn — test từng worker IO độc lập (JSON) |
-| Thêm capability mới | Phải sửa toàn prompt | Thêm worker/MCP tool riêng |
-| Routing visibility | Không có | Có đầy đủ history trace,
-| External Interaction | Khó | Có MCP |
-
-
----
-
-## 6. Giới hạn và điểm cần cải tiến
-
-1. **Routing Heuristic hard-code**: Khảo sát hiện dùng list các keyword tĩnh trong Python để Rẽ (if x in y). Nếu user ghi sai lỗi chính tả sẽ sai. 
-2. **Bottel-neck lúc gọi External Tools**: Web Search / Reranker Jina quá trình request lên cloud tốn nhiều time hoặc timeout. Cần có cơ chế streaming để cải thiện UX người dùng hoặc cài cache redis.
+##  5. Ưu điểm của Kiến trúc Multi-Agent
+- **Cô lập lỗi (Fault Isolation)**: Lỗi từ Internet không ảnh hưởng đến phân tích Policy nội bộ.
+- **Tính minh bạch (Observability)**: Mọi bước đi đều được Trace JSON ghi lại (Worker I/O).
+- **Độ tin cậy cao**: Sự kết hợp giữa Looping và Judge giúp giảm thiểu tối đa tình trạng "Hallucination" (Ảo giác AI).

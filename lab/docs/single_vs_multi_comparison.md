@@ -7,7 +7,7 @@
 |--------|----------------------|---------------------|-------|---------|
 | Avg confidence | ~0.70 | 0.82 | +0.12 | Hệ thống tự tin hơn nhờ dùng Judge đánh giá chéo. |
 | Avg latency (ms) | ~3,500 | 11,457 | +7,957 | Multi-agent chạy tuần tự nhiều worker và lookup external tool. |
-| Abstain rate (%) | 15% | ~6% | -9% | Khả năng tự tin hơn khi bí (Web Search) thay vì ngô nghê chối. |
+| Abstain rate (%) | ~12% | ~6% | -6% | Khả năng tự tin hơn khi bí (Web Search) thay vì ngô nghê chối. |
 | Multi-hop accuracy | Dưới 70% | 100% (15/15 success)| N/A | Pass toàn bộ test plan Day 09. |
 | Routing visibility | ✗ Không có | ✓ Có route_reason | N/A | Trace file log cực kì chi tiết minh bạch. |
 | Debug time (estimate) | 20 phút | 5 phút | -15 phút| Cô lập vấn đề theo từng Agent rất nhanh. |
