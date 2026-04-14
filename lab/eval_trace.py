@@ -198,8 +198,14 @@ def analyze_traces(traces_dir: str = "artifacts/traces") -> dict:
     source_counts = {}
 
     for t in traces:
-        route = t.get("supervisor_route", "unknown")
-        routing_counts[route] = routing_counts.get(route, 0) + 1
+        # Phân bổ routing (Ưu tiên ghi nhận nếu có can thiệp con người)
+        final_route = t.get("supervisor_route", "unknown")
+        if t.get("hitl_triggered"):
+            # Nếu có HITL, ta ghi nhận đây là task thuộc nhánh human_review
+            routing_counts["human_review"] = routing_counts.get("human_review", 0) + 1
+            hitl_triggers += 1
+        else:
+            routing_counts[final_route] = routing_counts.get(final_route, 0) + 1
 
         conf = t.get("confidence", 0)
         if conf:
