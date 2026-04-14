@@ -27,7 +27,7 @@ sys.path.append(os.path.abspath("lab"))
 from graph import run_graph, save_trace
 
 # ─────────────────────────────────────────────
-# 1. Run Pipeline on Test Questions
+# 1. Run Pipeline on Test
 # ─────────────────────────────────────────────
 
 def run_test_questions(questions_file: str = "lab/data/test_questions.json") -> list:
