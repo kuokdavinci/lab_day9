@@ -88,7 +88,7 @@ def run_test_questions(questions_file: str = "lab/data/test_questions.json") -> 
 # 2. Run Grading Questions (Sprint 4)
 # ─────────────────────────────────────────────
 
-def run_grading_questions(questions_file: str = "data/grading_questions.json") -> str:
+def run_grading_questions(questions_file: str = "lab/data/grading_questions.json") -> str:
     """
     Chạy pipeline với grading questions và lưu JSONL log.
     Dùng cho chấm điểm nhóm (chạy sau khi grading_questions.json được public lúc 17:00).

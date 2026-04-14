@@ -116,23 +116,6 @@ def supervisor_node(state: AgentState) -> AgentState:
     policy_keywords = [
         "hoàn tiền", "refund", "flash sale", "license", "digital", "kỹ thuật số",
         "cấp quyền", "access", "level 3", "permission", "admin", "phê duyệt", "approver",
-        "trả hàng", "return", "policy"
-    ]
-    
-    # 3. Nhóm từ khóa gợi ý Retrieval khác
-    retrieval_keywords = [
-        "quy trình", "hướng dẫn", "thủ tục", "faq", "văn bản", "thành viên",
-        "thông tin", "nghỉ phép", "mã lỗi", "wifi", "vpn", "mật khẩu"
-    ]
-
-    # LOGIC ROUTING CÓ ƯU TIÊN VÀ XỬ LÝ CHỒNG LẤN
-    has_priority = any(kw in task for kw in priority_retrieval)
-    has_policy = any(kw in task for kw in policy_keywords)
-
-    if has_policy:
-        # Nếu có từ khóa Policy/Access, ưu tiên Policy Worker vì nó thông minh hơn trong việc xử lý luật
-        route = "policy_tool_worker"
-        route_reason = "task contains policy/access keyword (overriding priority retrieval if present)"
         needs_tool = True
     elif has_priority:
         # Nếu chỉ có P1/SLA mà không liên quan Policy đặc thù
@@ -230,11 +213,11 @@ def human_review_node(state: AgentState) -> AgentState:
         solution = input("📝 Vui lòng nhập hướng xử lý của chuyên gia: ")
         state["history"].append(f"[human_review] APPROVED with manual solution: {solution}")
         state["final_answer"] = f"Giải pháp từ chuyên gia hệ thống: {solution}"
-        state["supervisor_route"] = "done"
+        state["supervisor_route"] = "synthesis"
     else:
         state["history"].append(f"[human_review] REJECTED by expert")
         state["final_answer"] = "Yêu cầu đã bị từ chối sau khi tra cứu Internet và tham vấn chuyên gia thất bại."
-        state["supervisor_route"] = "done" 
+        state["supervisor_route"] = "synthesis" 
     
     return state
 

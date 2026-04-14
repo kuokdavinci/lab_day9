@@ -7,7 +7,7 @@ import requests
 
 def web_search(query: str) -> str:
     """
-    Sử dụng Jina Search API để tra cứu thông tin trên Internet.
+    Sử dụng Brave Search API để tra cứu thông tin trên Internet.
     Trả về nội dung web dạng markdown.
     """
     try:
@@ -24,7 +24,7 @@ def web_search(query: str) -> str:
         if jina_key:
             headers["Authorization"] = f"Bearer {jina_key}"
 
-        print(f"   📡 Calling Jina AI Search (timeout: 30s)...")
+        print(f"   📡 Calling Brave Web Search (timeout: 30s)...")
         start_time = time.time()
         
         response = requests.get(url, headers=headers, timeout=30)
