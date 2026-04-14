@@ -32,12 +32,12 @@ Nhiệm vụ của bạn là phản hồi người dùng một cách chính xác
 QUY TẮC NGHIÊM NGẶT (STRICT RULES):
 1. TRUNG THỰC TUYỆT ĐỐI (GROUNDED): Chỉ trả lời dựa trên thông tin trong "TÀI LIỆU THAM KHẢO". Tuyệt đối không tự suy diễn hoặc dùng kiến thức bên ngoài.
 2. ƯU TIÊN KẾT QUẢ POLICY: Nếu phần "KẾT QUẢ PHÂN TÍCH CHÍNH SÁCH" ghi là "KHÔNG HỢP LỆ / BỊ TỪ CHỐI", câu trả lời của bạn phải tập trung giải thích lý do tại sao yêu cầu bị từ chối dựa trên các vi phạm đã phát hiện.
-3. TRÍCH DẪN FILE NGUỒN (CITATION): Phải ghi tên file nguồn ngay sau mỗi thông tin quan trọng, ví dụ: "Yêu cầu phải được thực hiện trong 7 ngày [policy_refund_v4.txt]".
+3. TRÍCH DẪN NGUỒN (UX CITATION): KHÔNG trích dẫn inline ở giữa câu (UX xấu). Hãy liệt kê ĐẦY ĐỦ các file nguồn tại mục "Căn cứ pháp lý/tài liệu" ở cuối bài theo định dạng: [file1.txt], [file2.txt].
 4. KHÔNG HALLUCINATE: Nếu context không chứa câu trả lời, hãy nói: "Tôi rất tiếc, thông tin này không có trong tài liệu nội bộ hiện tại."
 5. ĐỊNH DẠNG PHẢN HỒI:
    - **Kết quả**: [Được chấp thuận / Bị từ chối / Thông tin hướng dẫn]
-   - **Giải thích chi tiết**: (Dùng bullet points nếu cần)
-   - **Căn cứ pháp lý/tài liệu**: (Nêu tên các file đã sử dụng)
+   - **Giải thích chi tiết**: (Dùng bullet points nếu cần thiết)
+   - **Căn cứ pháp lý/tài liệu**: (Liệt kê tất cả file nguồn trong ngoặc vuông [])
 """
 
 
@@ -65,14 +65,14 @@ def _llm_as_judge(task: str, context: str, answer: str) -> dict:
     if "tài liệu nội bộ hiện chưa có thông tin" in answer or "ERROR" in answer:
         return {"score": 0.0, "reason": "Abstain: No information found."}
 
-    prompt = f"""Bạn là một giám khảo RAG cực kỳ khắt khe và khó tính.
+    prompt = f"""Bạn là một giám khảo chuyên nghiệp đánh giá chất lượng RAG.
     Hãy đánh giá câu trả lời dựa trên Context và Task.
     
-    Bảng trừ điểm (Cực kỳ quan trọng):
+    Bảng chấm điểm (Ưu tiên UX trích dẫn ở cuối):
     - Trừ 0.3 điểm: Nếu câu trả lời quá ngắn (dưới 2 câu) hoặc thiếu phần giải thích chi tiết.
-    - Trừ 0.2 điểm: Nếu trích dẫn [tên_file] không đặt đúng sau thông tin quan trọng.
-    - Trừ 0.5 điểm: Nếu có bất kỳ thông tin nào không tìm thấy trong Context.
-    - Trừ 0.1 điểm: Nếu cấu trúc câu trả lời không theo định dạng yêu cầu.
+    - Trừ 0.2 điểm: Nếu KHÔNG có mục "Căn cứ pháp lý/tài liệu" ở cuối bài hoặc không liệt kê file nguồn tham khảo trong ngoặc vuông [].
+    - Trừ 0.5 điểm: Nếu có thông tin sai lệch so với Context (Hallucination).
+    - Khuyến khích: Trích dẫn tập trung ở cuối để tăng trải nghiệm đọc cho người dùng.
     
     Task: {task}
     Context: {context}
@@ -188,11 +188,15 @@ def synthesize(task: str, chunks: list, policy_result: dict) -> dict:
     confidence_heuristic = _estimate_confidence(chunks, answer, policy_result)
     judge_info = _llm_as_judge(task, context, answer)
 
+    # HITL Trigger based on Judge Score
+    hitl_triggered = judge_info["score"] < 0.5
+
     return {
         "answer": answer,
         "sources": sources,
         "confidence": judge_info["score"],
         "judge_reason": judge_info["reason"],
+        "hitl_triggered": hitl_triggered,
         "debug_scores": {
             "heuristic": confidence_heuristic,
             "judge": judge_info["score"]
@@ -229,6 +233,7 @@ def run(state: dict) -> dict:
         state["sources"] = result["sources"]
         state["confidence"] = result["confidence"]
         state["judge_reason"] = result["judge_reason"]
+        state["hitl_triggered"] = result.get("hitl_triggered", False)
         state["debug_scores"] = result["debug_scores"]
 
         worker_io["output"] = {

@@ -125,14 +125,19 @@ def supervisor_node(state: AgentState) -> AgentState:
         "thông tin", "nghỉ phép", "mã lỗi", "wifi", "vpn", "mật khẩu"
     ]
 
-    # LOGIC ROUTING CÓ ƯU TIÊN
-    if any(kw in task for kw in priority_retrieval):
+    # LOGIC ROUTING CÓ ƯU TIÊN VÀ XỬ LÝ CHỒNG LẤN
+    has_priority = any(kw in task for kw in priority_retrieval)
+    has_policy = any(kw in task for kw in policy_keywords)
+
+    if has_policy:
+        # Nếu có từ khóa Policy/Access, ưu tiên Policy Worker vì nó thông minh hơn trong việc xử lý luật
+        route = "policy_tool_worker"
+        route_reason = "task contains policy/access keyword (overriding priority retrieval if present)"
+        needs_tool = True
+    elif has_priority:
+        # Nếu chỉ có P1/SLA mà không liên quan Policy đặc thù
         route = "retrieval_worker"
         route_reason = "priority retrieval based on P1/SLA keyword"
-    elif any(kw in task for kw in policy_keywords):
-        route = "policy_tool_worker"
-        route_reason = "task contains policy/access keyword"
-        needs_tool = True
     elif "ERR-" in task.upper():
         route = "human_review"
         route_reason = "unknown error code detected - needs expert review"
@@ -148,17 +153,6 @@ def supervisor_node(state: AgentState) -> AgentState:
         "emergency", "khẩn cấp", "khẩn", "ngay lập tức", "critical", "urgent", "gấp",
         "trực tiếp", "sập", "ngừng hoạt động"
     ]
-
-    if any(kw in task for kw in policy_keywords):
-        route = "policy_tool_worker"
-        route_reason = "task contains policy/access keyword"
-        needs_tool = True
-    elif any(kw in task for kw in retrieval_keywords):
-        route = "retrieval_worker"
-        route_reason = "standard retrieval task (FAQ/SLA/Info)"
-    else:
-        route = "retrieval_worker" # Default
-        route_reason = "generic request (defaulting to retrieval)"
 
     if any(kw in task for kw in risk_keywords):
         risk_high = True
@@ -192,26 +186,35 @@ def route_decision(state: AgentState) -> Literal["retrieval_worker", "policy_too
 
 def human_review_node(state: AgentState) -> AgentState:
     """
-    HITL node: pause và chờ human approval.
-    Trong lab này, implement dưới dạng placeholder (in ra warning).
-
-    TODO Sprint 3 (optional): Implement actual HITL với interrupt_before hoặc
-    breakpoint nếu dùng LangGraph.
+    Node yêu cầu con người duyệt trước khi tiếp tục (HITL).
+    Thực hiện tương tác thật qua terminal.
     """
+    task = state["task"]
+    reason = state["route_reason"]
     state["hitl_triggered"] = True
-    state["history"].append("[human_review] HITL triggered — awaiting human input")
     state["workers_called"].append("human_review")
-
-    # Placeholder: tự động approve để pipeline tiếp tục
-    print(f"\n⚠️  HITL TRIGGERED")
-    print(f"   Task: {state['task']}")
-    print(f"   Reason: {state['route_reason']}")
-    print(f"   Action: Auto-approving in lab mode (set hitl_triggered=True)\n")
-
-    # Sau khi human approve, route về retrieval để lấy evidence
-    state["supervisor_route"] = "retrieval_worker"
-    state["route_reason"] += " | human approved → retrieval"
-
+    
+    print("\n" + "!" * 60)
+    print(f"🛑 [HUMAN-IN-THE-LOOP REVIEW REQUIRED]")
+    print(f"   Lý do  : {reason}")
+    print(f"   Câu hỏi: {task}")
+    print("!" * 60)
+    
+    confirm = input("\n👉 Bạn có cho phép hệ thống tiếp tục xử lý không? (y/n): ").lower()
+    
+    if confirm == 'y':
+        state["history"].append(f"[human_review] APPROVED by user")
+        print("✅ Đã phê duyệt. Đang tiếp tục xử lý...")
+        # Sau khi human approve, route về retrieval để lấy evidence
+        state["supervisor_route"] = "retrieval_worker"
+        state["route_reason"] += " | human approved → retrieval"
+    else:
+        state["history"].append(f"[human_review] REJECTED by user")
+        print("🛑 Đã từ chối. Dừng xử lý nhiệm vụ này.")
+        state["final_answer"] = "Yêu cầu của bạn đã bị từ chối bởi người kiểm duyệt hệ thống."
+        # Chặn các node sau (Synthesis) bằng cách giả lập kết quả rỗng
+        state["supervisor_route"] = "done" 
+    
     return state
 
 
@@ -332,8 +335,7 @@ if __name__ == "__main__":
 
     test_queries = [
         "SLA xử lý ticket P1 là bao lâu?",
-        "Khách hàng Flash Sale yêu cầu hoàn tiền vì sản phẩm lỗi — được không?",
-        "Cần cấp quyền Level 3 để khắc phục P1 khẩn cấp. Quy trình là gì?",
+        "ERR-403-AUTH là lỗi gì?"
     ]
 
     for query in test_queries:
@@ -342,8 +344,11 @@ if __name__ == "__main__":
         print(f"  Route   : {result['supervisor_route']}")
         print(f"  Reason  : {result['route_reason']}")
         print(f"  Workers : {result['workers_called']}")
-        print(f"  Answer  : {result['final_answer'][:100]}...")
+        print(f"  Answer  :\n{result['final_answer']}")
+        print(f"  Sources : {result.get('sources', [])}")
         print(f"  Confidence: {result['confidence']}")
+        if result.get("hitl_triggered"):
+            print(f"  ⚠️  HITL TRIGGERED: Confidence too low or risky task. Needs human verification!")
         print(f"  Latency : {result['latency_ms']}ms")
 
         # Lưu trace

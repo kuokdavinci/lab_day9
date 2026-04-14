@@ -124,10 +124,10 @@ def retrieve_dense(query: str, top_k: int = DEFAULT_TOP_K) -> list:
     """
     Dense retrieval: embed query → query ChromaDB → Jina Rerank → trả về top_k chunks.
     """
-    embed = _get_embedding_fn()
-    query_embedding = embed(query)
-    
     try:
+        embed = _get_embedding_fn()
+        query_embedding = embed(query)
+        
         collection = _get_collection()
         # Lấy nhiều hơn top_k để có không gian cho rerank
         initial_top_k = top_k * 3
@@ -158,6 +158,8 @@ def retrieve_dense(query: str, top_k: int = DEFAULT_TOP_K) -> list:
         return chunks
 
     except Exception as e:
+        print(f"❌ Retrieval Error: {e}")
+        return []
         print(f"⚠️  ChromaDB query failed: {e}")
         return []
 
