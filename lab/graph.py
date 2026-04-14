@@ -109,18 +109,39 @@ def supervisor_node(state: AgentState) -> AgentState:
     needs_tool = False
     risk_high = False
 
-    # 1. Nhóm từ khóa gợi ý Policy Tool (Cần ra quyết định, check ngoại lệ, hoặc tools)
+    # 1. Nhóm ƯU TIÊN CAO: P1, SLA, Ticket (Luôn route sang Retrieval trước)
+    priority_retrieval = ["p1", "sla", "ticket", "escalation", "incident"]
+    
+    # 2. Nhóm từ khóa gợi ý Policy Tool (Cần ra quyết định, check ngoại lệ)
     policy_keywords = [
         "hoàn tiền", "refund", "flash sale", "license", "digital", "kỹ thuật số",
         "cấp quyền", "access", "level 3", "permission", "admin", "phê duyệt", "approver",
-        "trả hàng", "return", "thanh toán", "gia hạn"
+        "trả hàng", "return", "policy"
     ]
     
-    # 2. Nhóm từ khóa gợi ý Retrieval (Tra cứu thông tin tĩnh / SLA / Quy trình IT)
+    # 3. Nhóm từ khóa gợi ý Retrieval khác
     retrieval_keywords = [
-        "p1", "sla", "ticket", "quy trình", "hướng dẫn", "thủ tục", "faq", "văn bản",
-        "thông tin", "nghỉ phép", "mã lỗi", "wifi", "vpn", "mật khẩu", "password"
+        "quy trình", "hướng dẫn", "thủ tục", "faq", "văn bản", "thành viên",
+        "thông tin", "nghỉ phép", "mã lỗi", "wifi", "vpn", "mật khẩu"
     ]
+
+    # LOGIC ROUTING CÓ ƯU TIÊN
+    if any(kw in task for kw in priority_retrieval):
+        route = "retrieval_worker"
+        route_reason = "priority retrieval based on P1/SLA keyword"
+    elif any(kw in task for kw in policy_keywords):
+        route = "policy_tool_worker"
+        route_reason = "task contains policy/access keyword"
+        needs_tool = True
+    elif "ERR-" in task.upper():
+        route = "human_review"
+        route_reason = "unknown error code detected - needs expert review"
+    elif any(kw in task for kw in retrieval_keywords):
+        route = "retrieval_worker"
+        route_reason = "standard retrieval task"
+    else:
+        route = "retrieval_worker"
+        route_reason = "generic request (defaulting to retrieval)"
 
     # 3. Nhóm rủi ro cao cần flag
     risk_keywords = [
@@ -252,9 +273,8 @@ def build_graph():
             # After human approval, continue with retrieval
             state = retrieval_worker_node(state)
         elif route == "policy_tool_worker":
-            # Chạy Retrieval TIỀN TRẠM để lấy context cho Policy
-            state = retrieval_worker_node(state)
-            # Sau đó mới phân tích Policy
+            # Đã tối ưu: Policy worker tự gọi MCP tools để lấy context, 
+            # không cần đi qua retrieval_worker chung để tránh bottleneck.
             state = policy_tool_worker_node(state)
         else:
             # Luồng tra cứu thông tin thông thường (SLA/FAQ)

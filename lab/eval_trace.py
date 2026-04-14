@@ -18,25 +18,26 @@ import json
 import os
 import sys
 import argparse
+import time
 from datetime import datetime
 from typing import Optional
 
 # Import graph
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.append(os.path.abspath("lab"))
 from graph import run_graph, save_trace
-
 
 # ─────────────────────────────────────────────
 # 1. Run Pipeline on Test Questions
 # ─────────────────────────────────────────────
 
-def run_test_questions(questions_file: str = "data/test_questions.json") -> list:
+def run_test_questions(questions_file: str = "lab/data/test_questions.json") -> list:
     """
     Chạy pipeline với danh sách câu hỏi, lưu trace từng câu.
-
-    Returns:
-        list of (question, result) tuples
     """
+    if not os.path.exists(questions_file):
+        print(f"❌ {questions_file} không tồn tại.")
+        return []
+
     with open(questions_file, encoding="utf-8") as f:
         questions = json.load(f)
 
@@ -55,7 +56,7 @@ def run_test_questions(questions_file: str = "data/test_questions.json") -> list
             result["question_id"] = q_id
 
             # Save individual trace
-            trace_file = save_trace(result, f"artifacts/traces")
+            trace_file = save_trace(result, "artifacts/traces")
             print(f"  ✓ route={result.get('supervisor_route', '?')}, "
                   f"conf={result.get('confidence', 0):.2f}, "
                   f"{result.get('latency_ms', 0)}ms")
@@ -175,7 +176,7 @@ def analyze_traces(traces_dir: str = "artifacts/traces") -> dict:
         dict of metrics
     """
     if not os.path.exists(traces_dir):
-        print(f"⚠️  {traces_dir} không tồn tại. Chạy run_test_questions() trước.")
+        print(f"⚠️  {traces_dir} không tồn tại.")
         return {}
 
     trace_files = [f for f in os.listdir(traces_dir) if f.endswith(".json")]
@@ -185,7 +186,7 @@ def analyze_traces(traces_dir: str = "artifacts/traces") -> dict:
 
     traces = []
     for fname in trace_files:
-        with open(os.path.join(traces_dir, fname)) as f:
+        with open(os.path.join(traces_dir, fname), encoding="utf-8") as f:
             traces.append(json.load(f))
 
     # Compute metrics
@@ -214,7 +215,8 @@ def analyze_traces(traces_dir: str = "artifacts/traces") -> dict:
         if t.get("hitl_triggered"):
             hitl_triggers += 1
 
-        for src in t.get("retrieved_sources", []):
+        # Dùng key 'sources' thay vì 'retrieved_sources' cho đúng với synthesis_worker
+        for src in t.get("sources", []):
             source_counts[src] = source_counts.get(src, 0) + 1
 
     total = len(traces)
@@ -248,7 +250,7 @@ def compare_single_vs_multi(
         dict của comparison metrics
     """
     multi_metrics = analyze_traces(multi_traces_dir)
-
+    
     # TODO: Load Day 08 results nếu có
     # Nếu không có, dùng baseline giả lập để format
     day08_baseline = {
@@ -319,7 +321,7 @@ if __name__ == "__main__":
     parser.add_argument("--grading", action="store_true", help="Run grading questions")
     parser.add_argument("--analyze", action="store_true", help="Analyze existing traces")
     parser.add_argument("--compare", action="store_true", help="Compare single vs multi")
-    parser.add_argument("--test-file", default="data/test_questions.json", help="Test questions file")
+    parser.add_argument("--test-file", default="lab/data/test_questions.json", help="Test questions file")
     args = parser.parse_args()
 
     if args.grading:
