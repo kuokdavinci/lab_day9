@@ -17,52 +17,80 @@ Gọi độc lập để test:
 """
 
 import os
+from dotenv import load_dotenv
+
+# Load env variables for standalone test
+load_dotenv()
+if os.path.exists("lab/.env"):
+    load_dotenv("lab/.env")
 
 WORKER_NAME = "synthesis_worker"
 
-SYSTEM_PROMPT = """Bạn là trợ lý IT Helpdesk nội bộ.
+SYSTEM_PROMPT = """Bạn là chuyên gia tổng hợp thông tin (Synthesis Worker) của hệ thống IT Helpdesk & CS. 
+Nhiệm vụ của bạn là phản hồi người dùng một cách chính xác, dứt khoát và hoàn toàn dựa trên bằng chứng được cung cấp.
 
-Quy tắc nghiêm ngặt:
-1. CHỈ trả lời dựa vào context được cung cấp. KHÔNG dùng kiến thức ngoài.
-2. Nếu context không đủ để trả lời → nói rõ "Không đủ thông tin trong tài liệu nội bộ".
-3. Trích dẫn nguồn cuối mỗi câu quan trọng: [tên_file].
-4. Trả lời súc tích, có cấu trúc. Không dài dòng.
-5. Nếu có exceptions/ngoại lệ → nêu rõ ràng trước khi kết luận.
+QUY TẮC NGHIÊM NGẶT (STRICT RULES):
+1. TRUNG THỰC TUYỆT ĐỐI (GROUNDED): Chỉ trả lời dựa trên thông tin trong "TÀI LIỆU THAM KHẢO". Tuyệt đối không tự suy diễn hoặc dùng kiến thức bên ngoài.
+2. ƯU TIÊN KẾT QUẢ POLICY: Nếu phần "KẾT QUẢ PHÂN TÍCH CHÍNH SÁCH" ghi là "KHÔNG HỢP LỆ / BỊ TỪ CHỐI", câu trả lời của bạn phải tập trung giải thích lý do tại sao yêu cầu bị từ chối dựa trên các vi phạm đã phát hiện.
+3. TRÍCH DẪN FILE NGUỒN (CITATION): Phải ghi tên file nguồn ngay sau mỗi thông tin quan trọng, ví dụ: "Yêu cầu phải được thực hiện trong 7 ngày [policy_refund_v4.txt]".
+4. KHÔNG HALLUCINATE: Nếu context không chứa câu trả lời, hãy nói: "Tôi rất tiếc, thông tin này không có trong tài liệu nội bộ hiện tại."
+5. ĐỊNH DẠNG PHẢN HỒI:
+   - **Kết quả**: [Được chấp thuận / Bị từ chối / Thông tin hướng dẫn]
+   - **Giải thích chi tiết**: (Dùng bullet points nếu cần)
+   - **Căn cứ pháp lý/tài liệu**: (Nêu tên các file đã sử dụng)
 """
 
 
-def _call_llm(messages: list) -> str:
-    """
-    Gọi LLM để tổng hợp câu trả lời.
-    TODO Sprint 2: Implement với OpenAI hoặc Gemini.
-    """
-    # Option A: OpenAI
+def _call_llm(messages: list, response_format: dict = None) -> str:
+    """Gọi OpenAI để xử lý yêu cầu."""
     try:
         from openai import OpenAI
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            temperature=0.1,  # Low temperature để grounded
-            max_tokens=500,
-        )
+        params = {
+            "model": "gpt-4o-mini",
+            "messages": messages,
+            "temperature": 0,
+        }
+        if response_format:
+            params["response_format"] = response_format
+            
+        response = client.chat.completions.create(**params)
         return response.choices[0].message.content
-    except Exception:
-        pass
+    except Exception as e:
+        return f"[ERROR] LLM Call failed: {e}"
 
-    # Option B: Gemini
+
+def _llm_as_judge(task: str, context: str, answer: str) -> dict:
+    """Sử dụng LLM-as-a-Judge khắt khe để chấm điểm và giải trình."""
+    if "tài liệu nội bộ hiện chưa có thông tin" in answer or "ERROR" in answer:
+        return {"score": 0.0, "reason": "Abstain: No information found."}
+
+    prompt = f"""Bạn là một giám khảo RAG cực kỳ khắt khe và khó tính.
+    Hãy đánh giá câu trả lời dựa trên Context và Task.
+    
+    Bảng trừ điểm (Cực kỳ quan trọng):
+    - Trừ 0.3 điểm: Nếu câu trả lời quá ngắn (dưới 2 câu) hoặc thiếu phần giải thích chi tiết.
+    - Trừ 0.2 điểm: Nếu trích dẫn [tên_file] không đặt đúng sau thông tin quan trọng.
+    - Trừ 0.5 điểm: Nếu có bất kỳ thông tin nào không tìm thấy trong Context.
+    - Trừ 0.1 điểm: Nếu cấu trúc câu trả lời không theo định dạng yêu cầu.
+    
+    Task: {task}
+    Context: {context}
+    Câu trả lời: {answer}
+    
+    Hãy chấm điểm công tâm (Scale 0.0 - 1.0). 
+    Trả về JSON: {{"score": float, "reason": "lý do cụ thể cho điểm số này"}}
+    """
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        combined = "\n".join([m["content"] for m in messages])
-        response = model.generate_content(combined)
-        return response.text
-    except Exception:
-        pass
-
-    # Fallback: trả về message báo lỗi (không hallucinate)
-    return "[SYNTHESIS ERROR] Không thể gọi LLM. Kiểm tra API key trong .env."
+        import json
+        res_raw = _call_llm([{"role": "user", "content": prompt}], response_format={"type": "json_object"})
+        res = json.loads(res_raw)
+        return {
+            "score": float(res.get("score", 0.5)),
+            "reason": res.get("reason", "No reason provided.")
+        }
+    except:
+        return {"score": 0.5, "reason": "Judge error, defaulting."}
 
 
 def _build_context(chunks: list, policy_result: dict) -> str:
@@ -74,16 +102,26 @@ def _build_context(chunks: list, policy_result: dict) -> str:
         for i, chunk in enumerate(chunks, 1):
             source = chunk.get("source", "unknown")
             text = chunk.get("text", "")
-            score = chunk.get("score", 0)
-            parts.append(f"[{i}] Nguồn: {source} (relevance: {score:.2f})\n{text}")
+            parts.append(f"Nguồn: {source}\nNội dung: {text}")
 
-    if policy_result and policy_result.get("exceptions_found"):
-        parts.append("\n=== POLICY EXCEPTIONS ===")
-        for ex in policy_result["exceptions_found"]:
-            parts.append(f"- {ex.get('rule', '')}")
+    if policy_result:
+        parts.append("\n=== KẾT QUẢ PHÂN TÍCH CHÍNH SÁCH ===")
+        status = "HỢP LỆ" if policy_result.get("policy_applies") else "KHÔNG HỢP LỆ / BỊ TỪ CHỐI"
+        parts.append(f"Trạng thái: {status}")
+        
+        if policy_result.get("explanation"):
+            parts.append(f"Giải thích từ chuyên gia: {policy_result['explanation']}")
+            
+        if policy_result.get("exceptions_found"):
+            parts.append("Các vi phạm phát hiện:")
+            for ex in policy_result["exceptions_found"]:
+                parts.append(f"- {ex.get('rule', '')}")
+        
+        if policy_result.get("policy_version_note"):
+            parts.append(f"Ghi chú phiên bản: {policy_result['policy_version_note']}")
 
     if not parts:
-        return "(Không có context)"
+        return "(Không có dữ liệu đầu vào)"
 
     return "\n\n".join(parts)
 
@@ -116,36 +154,49 @@ def _estimate_confidence(chunks: list, answer: str, policy_result: dict) -> floa
     return round(max(0.1, confidence), 2)
 
 
+def _estimate_confidence(chunks: list, answer: str, policy_result: dict) -> float:
+    """Ước tính confidence dựa trên heuristic (không gọi LLM)."""
+    if not chunks:
+        return 0.1
+    if "tài liệu nội bộ hiện chưa có thông tin" in answer:
+        return 0.3
+    
+    # Trung bình cộng score của các chunks (giả định 0.8 nếu không có score)
+    avg_chunk_score = sum(c.get("score", 0.8) for c in chunks) / len(chunks)
+    
+    # Trừ điểm nếu có vi phạm chính sách
+    penalty = 0.2 if not policy_result.get("policy_applies", True) else 0.0
+    
+    return round(max(0.1, min(0.95, avg_chunk_score - penalty)), 2)
+
+
 def synthesize(task: str, chunks: list, policy_result: dict) -> dict:
     """
-    Tổng hợp câu trả lời từ chunks và policy context.
-
-    Returns:
-        {"answer": str, "sources": list, "confidence": float}
+    Tổng hợp câu trả lời và so sánh 2 loại điểm confidence.
     """
     context = _build_context(chunks, policy_result)
 
-    # Build messages
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": f"""Câu hỏi: {task}
-
-{context}
-
-Hãy trả lời câu hỏi dựa vào tài liệu trên."""
-        }
+        {"role": "user", "content": f"Câu hỏi: {task}\n\n{context}\n\nHãy trả lời dựa trên dữ liệu trên."}
     ]
 
     answer = _call_llm(messages)
     sources = list({c.get("source", "unknown") for c in chunks})
-    confidence = _estimate_confidence(chunks, answer, policy_result)
+    
+    # So sánh 2 phương pháp chấm điểm
+    confidence_heuristic = _estimate_confidence(chunks, answer, policy_result)
+    judge_info = _llm_as_judge(task, context, answer)
 
     return {
         "answer": answer,
         "sources": sources,
-        "confidence": confidence,
+        "confidence": judge_info["score"],
+        "judge_reason": judge_info["reason"],
+        "debug_scores": {
+            "heuristic": confidence_heuristic,
+            "judge": judge_info["score"]
+        }
     }
 
 
@@ -177,15 +228,18 @@ def run(state: dict) -> dict:
         state["final_answer"] = result["answer"]
         state["sources"] = result["sources"]
         state["confidence"] = result["confidence"]
+        state["judge_reason"] = result["judge_reason"]
+        state["debug_scores"] = result["debug_scores"]
 
         worker_io["output"] = {
             "answer_length": len(result["answer"]),
             "sources": result["sources"],
             "confidence": result["confidence"],
+            "judge_reason": result["judge_reason"],
+            "heuristic_score": result["debug_scores"]["heuristic"]
         }
         state["history"].append(
-            f"[{WORKER_NAME}] answer generated, confidence={result['confidence']}, "
-            f"sources={result['sources']}"
+            f"[{WORKER_NAME}] Judge: {result['confidence']} ({result['judge_reason']}), Heuristic: {result['debug_scores']['heuristic']}"
         )
 
     except Exception as e:

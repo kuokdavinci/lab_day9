@@ -17,6 +17,11 @@ Gọi độc lập để test:
 
 import os
 import sys
+import requests
+from dotenv import load_dotenv
+
+# Load env variables for standalone test
+load_dotenv()
 
 # ─────────────────────────────────────────────
 # Worker Contract (xem contracts/worker_contracts.yaml)
@@ -30,36 +35,70 @@ DEFAULT_TOP_K = 3
 
 def _get_embedding_fn():
     """
-    Trả về embedding function.
-    TODO Sprint 1: Implement dùng OpenAI hoặc Sentence Transformers.
+    Trả về embedding function sử dụng Jina AI (mặc định).
     """
-    # Option A: Sentence Transformers (offline, không cần API key)
-    try:
-        from sentence_transformers import SentenceTransformer
-        model = SentenceTransformer("all-MiniLM-L6-v2")
-        def embed(text: str) -> list:
-            return model.encode([text])[0].tolist()
-        return embed
-    except ImportError:
-        pass
+    jina_key = os.getenv("JINA_API_KEY")
+    if not jina_key:
+        raise ValueError("JINA_API_KEY missing in environment variables.")
 
-    # Option B: OpenAI (cần API key)
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        def embed(text: str) -> list:
-            resp = client.embeddings.create(input=text, model="text-embedding-3-small")
-            return resp.data[0].embedding
-        return embed
-    except ImportError:
-        pass
+    model_name = os.getenv("JINA_EMBEDDING_MODEL", "jina-embeddings-v3")
 
-    # Fallback: random embeddings cho test (KHÔNG dùng production)
-    import random
     def embed(text: str) -> list:
-        return [random.random() for _ in range(384)]
-    print("⚠️  WARNING: Using random embeddings (test only). Install sentence-transformers.")
+        url = "https://api.jina.ai/v1/embeddings"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {jina_key}"
+        }
+        data = {
+            "model": model_name,
+            "task": "retrieval.query",
+            "input": [text]
+        }
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+        return response.json()["data"][0]["embedding"]
+
     return embed
+
+
+def rerank_chunks(query: str, chunks: list, top_n: int = 3) -> list:
+    """
+    Sử dụng Jina Reranker để sắp xếp lại các chunks.
+    """
+    jina_key = os.getenv("JINA_API_KEY")
+    rerank_model = os.getenv("JINA_RERANK_MODEL", "jina-reranker-v2-base-multilingual")
+
+    if not jina_key or not chunks:
+        return chunks[:top_n]
+
+    try:
+        url = "https://api.jina.ai/v1/rerank"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {jina_key}"
+        }
+        documents = [c["text"] for c in chunks]
+        data = {
+            "model": rerank_model,
+            "query": query,
+            "documents": documents,
+            "top_n": top_n
+        }
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+        
+        results = response.json()["results"]
+        reranked_chunks = []
+        for res in results:
+            idx = res["index"]
+            chunk = chunks[idx].copy()
+            chunk["rerank_score"] = res["relevance_score"]
+            reranked_chunks.append(chunk)
+            
+        return reranked_chunks
+    except Exception as e:
+        print(f"⚠️  Jina Rerank failed: {e}")
+        return chunks[:top_n]
 
 
 def _get_collection():
@@ -83,45 +122,43 @@ def _get_collection():
 
 def retrieve_dense(query: str, top_k: int = DEFAULT_TOP_K) -> list:
     """
-    Dense retrieval: embed query → query ChromaDB → trả về top_k chunks.
-
-    TODO Sprint 2: Implement phần này.
-    - Dùng _get_embedding_fn() để embed query
-    - Query collection với n_results=top_k
-    - Format result thành list of dict
-
-    Returns:
-        list of {"text": str, "source": str, "score": float, "metadata": dict}
+    Dense retrieval: embed query → query ChromaDB → Jina Rerank → trả về top_k chunks.
     """
-    # TODO: Implement dense retrieval
     embed = _get_embedding_fn()
     query_embedding = embed(query)
-
+    
     try:
         collection = _get_collection()
+        # Lấy nhiều hơn top_k để có không gian cho rerank
+        initial_top_k = top_k * 3
         results = collection.query(
             query_embeddings=[query_embedding],
-            n_results=top_k,
+            n_results=initial_top_k,
             include=["documents", "distances", "metadatas"]
         )
 
         chunks = []
-        for i, (doc, dist, meta) in enumerate(zip(
-            results["documents"][0],
-            results["distances"][0],
-            results["metadatas"][0]
-        )):
-            chunks.append({
-                "text": doc,
-                "source": meta.get("source", "unknown"),
-                "score": round(1 - dist, 4),  # cosine similarity
-                "metadata": meta,
-            })
+        if results["documents"] and results["documents"][0]:
+            for doc, dist, meta in zip(
+                results["documents"][0],
+                results["distances"][0],
+                results["metadatas"][0]
+            ):
+                chunks.append({
+                    "text": doc,
+                    "source": meta.get("source", "unknown"),
+                    "score": round(1 - dist, 4),  # cosine similarity
+                    "metadata": meta,
+                })
+
+        # Apply Reranking
+        if chunks:
+            chunks = rerank_chunks(query, chunks, top_n=top_k)
+
         return chunks
 
     except Exception as e:
         print(f"⚠️  ChromaDB query failed: {e}")
-        # Fallback: return empty (abstain)
         return []
 
 
@@ -195,12 +232,13 @@ if __name__ == "__main__":
     ]
 
     for query in test_queries:
-        print(f"\n▶ Query: {query}")
+        print(f"\n> Query: {query}")
         result = run({"task": query})
         chunks = result.get("retrieved_chunks", [])
         print(f"  Retrieved: {len(chunks)} chunks")
         for c in chunks[:2]:
-            print(f"    [{c['score']:.3f}] {c['source']}: {c['text'][:80]}...")
+            score_val = c.get("rerank_score", c.get("score", 0))
+            print(f"    [{score_val:.3f}] {c['source']}: {c['text'][:80]}...")
         print(f"  Sources: {result.get('retrieved_sources', [])}")
 
     print("\n✅ retrieval_worker test done.")
