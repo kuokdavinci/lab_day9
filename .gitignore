@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.venv/
+.python-version
+
+# Environment and Secrets
+.env
+.env.*
+!.env.example
+
+# RAG / Data / Persistence
+chroma_db/
+**/chroma_db/
+artifacts/
+**/artifacts/
+**/.ipynb_checkpoints/
+
+# IDE / System
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
