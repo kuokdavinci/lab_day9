@@ -125,6 +125,24 @@ TOOL_SCHEMAS = {
             },
         },
     },
+    "brave_search": {
+        "name": "brave_search",
+        "description": "Tra cứu thông tin trên Internet toàn cầu (Real-time). Dùng cho các lỗi lạ hoặc kiến thức ngoài hệ thống.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Nội dung cần tìm kiếm trên Google/Brave"},
+            },
+            "required": ["query"],
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "results": {"type": "array"},
+                "summary": {"type": "string"},
+            },
+        },
+    },
 }
 
 
@@ -275,6 +293,29 @@ def tool_create_ticket(priority: str, title: str, description: str = "") -> dict
     return ticket
 
 
+def tool_brave_search(query: str) -> dict:
+    """
+    Thực hiện tra cứu Internet thực tế (Sử dụng Jina/Brave làm Backend).
+    """
+    try:
+        # Tái sử dụng logic web_search đã viết trong workers.research
+        import sys
+        sys.path.insert(0, os.path.dirname(__file__))
+        from workers.research import web_search
+        
+        content = web_search(query)
+        if content:
+            return {
+                "source": "Brave/Internet",
+                "content": content[:3000], # Giới hạn độ dài trả về
+                "query": query,
+                "status": "success"
+            }
+        return {"error": "Không tìm thấy kết quả hoặc lỗi kết nối Search API."}
+    except Exception as e:
+        return {"error": f"Lỗi thực thi Brave Search: {str(e)}"}
+
+
 # ─────────────────────────────────────────────
 # Dispatch Layer — MCP server interface
 # ─────────────────────────────────────────────
@@ -284,6 +325,7 @@ TOOL_REGISTRY = {
     "get_ticket_info": tool_get_ticket_info,
     "check_access_permission": tool_check_access_permission,
     "create_ticket": tool_create_ticket,
+    "brave_search": tool_brave_search,
 }
 
 

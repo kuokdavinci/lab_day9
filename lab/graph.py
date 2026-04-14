@@ -184,35 +184,56 @@ def route_decision(state: AgentState) -> Literal["retrieval_worker", "policy_too
 # 4. Human Review Node — HITL placeholder
 # ─────────────────────────────────────────────
 
+from workers.research import web_search
+
 def human_review_node(state: AgentState) -> AgentState:
     """
-    Node yêu cầu con người duyệt trước khi tiếp tục (HITL).
-    Thực hiện tương tác thật qua terminal.
+    Node xử lý các case khó/lạ (Smart HITL with LIVE Research).
+    Quy trình: Deep Research Internet -> Nếu có giải pháp thì gợi ý -> Hỏi Human.
     """
     task = state["task"]
     reason = state["route_reason"]
     state["hitl_triggered"] = True
     state["workers_called"].append("human_review")
     
+    print(f"\n🌐 [INTERNET RESEARCH] Agent đang tra cứu thực tế trên Internet cho mã lỗi: {task}")
+    search_result = web_search(task)
+    
+    if search_result and len(search_result) > 100:
+        print("💡 [RESEARCH SUGGESTION] Đã tìm thấy thông tin từ Internet:")
+        print("-" * 30)
+        print(search_result[:500] + "...") # Hiển thị snippet
+        print("-" * 30)
+        
+        confirm = input("\n👉 Bạn có muốn sử dụng kết quả tra cứu này làm căn cứ không? (y/n): ").lower()
+        if confirm == 'y':
+            state["history"].append("[human_review] Solved via Live Web Research")
+            state["retrieved_chunks"].append({
+                "text": f"Dữ liệu tra cứu Internet: {search_result[:2000]}",
+                "source": "Internet_Research",
+                "score": 1.0
+            })
+            # Sau khi có kết quả research, ta có thể nhảy tới synthesis
+            state["supervisor_route"] = "synthesis_worker"
+            return state
+
+    # Nếu không tìm thấy hoặc người dùng muốn xử lý thủ công
     print("\n" + "!" * 60)
-    print(f"🛑 [HUMAN-IN-THE-LOOP REVIEW REQUIRED]")
+    print(f"🛑 [HUMAN-IN-THE-LOOP REQUIRED] Cần chuyên gia xử lý trực tiếp.")
     print(f"   Lý do  : {reason}")
-    print(f"   Câu hỏi: {task}")
+    print(f"   Nhiệm vụ: {task}")
     print("!" * 60)
     
-    confirm = input("\n👉 Bạn có cho phép hệ thống tiếp tục xử lý không? (y/n): ").lower()
+    confirm = input("\n👉 Bạn có hướng xử lý giải quyết case này không? (y/n): ").lower()
     
     if confirm == 'y':
-        state["history"].append(f"[human_review] APPROVED by user")
-        print("✅ Đã phê duyệt. Đang tiếp tục xử lý...")
-        # Sau khi human approve, route về retrieval để lấy evidence
-        state["supervisor_route"] = "retrieval_worker"
-        state["route_reason"] += " | human approved → retrieval"
+        solution = input("📝 Vui lòng nhập hướng xử lý của chuyên gia: ")
+        state["history"].append(f"[human_review] APPROVED with manual solution: {solution}")
+        state["final_answer"] = f"Giải pháp từ chuyên gia hệ thống: {solution}"
+        state["supervisor_route"] = "done"
     else:
-        state["history"].append(f"[human_review] REJECTED by user")
-        print("🛑 Đã từ chối. Dừng xử lý nhiệm vụ này.")
-        state["final_answer"] = "Yêu cầu của bạn đã bị từ chối bởi người kiểm duyệt hệ thống."
-        # Chặn các node sau (Synthesis) bằng cách giả lập kết quả rỗng
+        state["history"].append(f"[human_review] REJECTED by expert")
+        state["final_answer"] = "Yêu cầu đã bị từ chối sau khi tra cứu Internet và tham vấn chuyên gia thất bại."
         state["supervisor_route"] = "done" 
     
     return state
@@ -273,18 +294,14 @@ def build_graph():
 
         if route == "human_review":
             state = human_review_node(state)
-            # After human approval, continue with retrieval
-            state = retrieval_worker_node(state)
         elif route == "policy_tool_worker":
-            # Đã tối ưu: Policy worker tự gọi MCP tools để lấy context, 
-            # không cần đi qua retrieval_worker chung để tránh bottleneck.
             state = policy_tool_worker_node(state)
         else:
-            # Luồng tra cứu thông tin thông thường (SLA/FAQ)
             state = retrieval_worker_node(state)
 
-        # Step 3: Always synthesize
-        state = synthesis_worker_node(state)
+        # Step 3: Hội tụ về Synthesis nếu nhiệm vụ chưa kết thúc (Done/Rejected)
+        if state.get("supervisor_route") != "done":
+            state = synthesis_worker_node(state)
 
         state["latency_ms"] = int((time.time() - start) * 1000)
         state["history"].append(f"[graph] completed in {state['latency_ms']}ms")
