@@ -251,43 +251,27 @@ def synthesis_worker_node(state: AgentState) -> AgentState:
 # ─────────────────────────────────────────────
 
 def build_graph():
-    """
-    Xây dựng graph với supervisor-worker pattern.
-
-    Option A (đơn giản — Python thuần): Dùng if/else, không cần LangGraph.
-    Option B (nâng cao): Dùng LangGraph StateGraph với conditional edges.
-
-    Lab này implement Option A theo mặc định.
-    TODO Sprint 1: Có thể chuyển sang LangGraph nếu muốn.
-    """
-    # Option A: Simple Python orchestrator
+    """Xây dựng graph đơn giản theo supervisor-worker pattern."""
     def run(state: AgentState) -> AgentState:
         import time
         start = time.time()
 
-        # Step 1: Supervisor decides route
+        # 1. Routing
         state = supervisor_node(state)
-
-        # Step 2: Route to appropriate worker
         route = route_decision(state)
 
-        if route == "human_review":
-            state = human_review_node(state)
-            # After human approval, continue with retrieval
-            state = retrieval_worker_node(state)
-        elif route == "policy_tool_worker":
-            # Đã tối ưu: Policy worker tự gọi MCP tools để lấy context, 
-            # không cần đi qua retrieval_worker chung để tránh bottleneck.
-            state = policy_tool_worker_node(state)
-        else:
-            # Luồng tra cứu thông tin thông thường (SLA/FAQ)
-            state = retrieval_worker_node(state)
+        # 2. Worker mapping
+        worker_map = {
+            "human_review": lambda s: retrieval_worker_node(human_review_node(s)),
+            "policy_tool_worker": policy_tool_worker_node,
+        }
+        state = worker_map.get(route, retrieval_worker_node)(state)
 
-        # Step 3: Always synthesize
+        # 3. Synthesis & completion
         state = synthesis_worker_node(state)
-
         state["latency_ms"] = int((time.time() - start) * 1000)
         state["history"].append(f"[graph] completed in {state['latency_ms']}ms")
+        
         return state
 
     return run
@@ -299,24 +283,12 @@ def build_graph():
 
 _graph = build_graph()
 
-
 def run_graph(task: str) -> AgentState:
-    """
-    Entry point: nhận câu hỏi, trả về AgentState với full trace.
-
-    Args:
-        task: Câu hỏi từ user
-
-    Returns:
-        AgentState với final_answer, trace, routing info, v.v.
-    """
-    state = make_initial_state(task)
-    result = _graph(state)
-    return result
-
+    """Entry point: nhận task từ user, trả về AgentState chứa trace."""
+    return _graph(make_initial_state(task))
 
 def save_trace(state: AgentState, output_dir: str = "./artifacts/traces") -> str:
-    """Lưu trace ra file JSON."""
+    """Lưu toàn bộ AgentState ra log file JSON."""
     os.makedirs(output_dir, exist_ok=True)
     filename = f"{output_dir}/{state['run_id']}.json"
     with open(filename, "w", encoding="utf-8") as f:
