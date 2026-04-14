@@ -11,11 +11,8 @@
 
 # Huge Files & DB
 *chroma_db*
-*artifacts*
 lab/chroma_db/
-lab/artifacts/
 **/chroma_db/
-**/artifacts/
 
 # System
 .DS_Store
